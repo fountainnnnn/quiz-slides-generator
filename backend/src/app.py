@@ -13,7 +13,12 @@ except Exception as e:
     raise RuntimeError(f"Failed to import pipeline from src.core: {e}")
 
 app = FastAPI(title="Slides → Quiz Deck API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,7 +95,10 @@ async def generate(
         data = result_pptx if isinstance(result_pptx, (bytes, bytearray)) else bytes(result_pptx)
     out_path.write_bytes(data)
 
-    abs_url = str(request.url_for("get_file", filename=out_name))
+    # ✅ Always return a public HTTPS link
+    space_url = os.getenv("SPACE_URL", "https://crystallizedcrust-quiz-generator.hf.space")
+    abs_url = f"{space_url}/files/{out_name}"
+
     return {"status": "ok", "filename": out_name, "url": abs_url}
 
 
