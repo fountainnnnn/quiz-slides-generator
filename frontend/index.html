@@ -12,6 +12,17 @@
   <style>
     /* smooth anchor scroll without touching your styles.css */
     html { scroll-behavior: smooth; }
+    .contact-section {
+      background: #f8f9fa;
+      border-top: 1px solid #dee2e6;
+      padding: 2rem 0;
+    }
+    .linkedin-logo {
+      width: 32px;
+      height: 32px;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
   </style>
 </head>
 <body class="d-flex flex-column min-vh-100">
@@ -160,11 +171,33 @@
               </form>
             </div>
           </div>
-
         </div>
       </div>
     </div>
   </main>
+
+  <!-- CONTACT SECTION -->
+  <section class="contact-section text-center">
+    <div class="container">
+      <h5 class="mb-3">Found an issue or have feedback?</h5>
+      <a href="https://www.linkedin.com/in/ngyuhang/" target="_blank" rel="noopener noreferrer" class="d-inline-flex align-items-center btn btn-outline-primary px-3 py-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="linkedin-logo" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 
+          1.146v13.708c0 .633-.526 1.146-1.175 
+          1.146H1.175C.526 16 0 15.487 0 
+          14.854V1.146zM4.943 13.5V6.169H2.542V13.5h2.401zm-1.2-8.258c.837 
+          0 1.358-.554 1.358-1.248-.015-.71-.52-1.248-1.342-1.248S2.4 
+          3.285 2.4 3.994c0 .694.52 1.248 1.327 
+          1.248h.016zm4.908 8.258V9.359c0-.221.016-.442.08-.599.176-.442.576-.9 
+          1.248-.9.881 0 1.233.678 1.233 
+          1.672V13.5h2.401V9.25c0-2.273-1.214-3.335-2.834-3.335-1.309 
+          0-1.898.725-2.227 1.233h.016v-1.05H8.651c.03.678 0 
+          7.402 0 7.402h2.401z"/>
+        </svg>
+        <span>Connect with me on LinkedIn</span>
+      </a>
+    </div>
+  </section>
 
   <!-- STICKY FOOTER -->
   <footer class="border-top py-3 bg-white mt-auto">
