@@ -19,6 +19,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+@app.get("/")
+def index():
+    return {"message": "Slides → Quiz Deck API is running", "endpoints": ["/generate", "/files/{filename}", "/healthz"]}
+
 @app.post("/generate")
 async def generate(request: Request,
     file: UploadFile = File(...),
