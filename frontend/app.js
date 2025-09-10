@@ -1,7 +1,7 @@
 // Backend origin (override with ?api=https://your-api.com)
 const BACKEND_BASE_URL =
   new URLSearchParams(location.search).get("api") ||
-  "https://crystallizedcrust-quiz-generator.hf.space/";
+  "https://crystallizedcrust-quiz-generator.hf.space";
 // DOM
 const form = document.getElementById("gen-form");
 const statusAlert = document.getElementById("statusAlert");
