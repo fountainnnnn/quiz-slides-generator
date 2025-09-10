@@ -1,18 +1,39 @@
-*{box-sizing:border-box}
-body{margin:0;font-family:system-ui,Arial,Helvetica,sans-serif;color:#0b1320;background:#f7f8fb}
-header{padding:28px 16px;background:#0b0f14;color:#e6edf3}
-header h1{margin:0 0 8px}
-main{max-width:860px;margin:24px auto;padding:0 16px}
-form{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
-.field{margin:12px 0;display:flex;flex-direction:column;gap:6px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:12px}
-label{font-size:14px;display:flex;flex-direction:column;gap:6px}
-input[type="file"],input,select{padding:10px;border:1px solid #d1d5db;border-radius:10px;background:#fafafa}
-button{appearance:none;border:0;background:#2563eb;color:#fff;padding:12px 16px;border-radius:10px;font-weight:600;cursor:pointer}
-button:disabled{opacity:.6;cursor:not-allowed}
-.status,.download{margin-top:16px;padding:12px;border-radius:10px}
-.status{background:#f1f5f9;border:1px solid #cbd5e1}
-.download{background:#ecfdf5;border:1px solid #a7f3d0}
-footer{max-width:860px;margin:32px auto 48px;padding:0 16px;color:#555}
-details{margin-top:12px}
-summary{cursor:pointer;padding:6px 0;font-weight:600}
+/* Pastel, light, minimal — override a few Bootstrap vars */
+:root {
+  --brand-hero: #f4f7ff;        /* soft indigo tint */
+  --brand-primary: #6f8bf6;     /* pastel indigo */
+  --brand-secondary: #6b7280;   /* slate */
+}
+
+/* Use a consistent soft palette */
+.btn-primary,
+.btn-outline-primary:hover,
+.btn-outline-primary:active,
+.btn-outline-primary:focus {
+  background-color: var(--brand-primary) !important;
+  border-color: var(--brand-primary) !important;
+}
+
+.text-primary { color: var(--brand-primary) !important; }
+.bg-hero { background: var(--brand-hero); }
+
+/* Make cards a bit softer */
+.card { border-color: #e9ecf5; }
+.border-bottom { border-color: #e9ecf5 !important; }
+.border-top { border-color: #e9ecf5 !important; }
+
+/* Inputs */
+.form-control,
+.form-select {
+  border-color: #dbe1f1;
+}
+
+/* Keep things readable */
+body { color: #0f172a; background: #fafbff; }
+.lead, .text-secondary { color: #6b7280 !important; }
+
+/* Progress bar color align to brand */
+.progress-bar { background-color: var(--brand-primary); }
+
+/* Small spacing tweaks */
+.hero .btn { box-shadow: 0 6px 18px rgba(111, 139, 246, 0.25); }

@@ -3,55 +3,186 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Slides → Quiz Deck Generator</title>
+  <title>Slides → Quiz Deck</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Custom -->
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* smooth anchor scroll without touching your styles.css */
+    html { scroll-behavior: smooth; }
+  </style>
 </head>
-<body>
-  <header>
-    <h1>Slides → Quiz Deck Generator</h1>
-    <p>Upload PPTX/PDF. The server extracts content, uses Gemini for Q&A, and returns a downloadable PPTX.</p>
+<body class="d-flex flex-column min-vh-100">
+
+  <!-- NAVBAR (brand only) -->
+  <nav class="navbar navbar-light border-bottom bg-white">
+    <div class="container">
+      <a class="navbar-brand fw-semibold" href="#">Quiz Deck</a>
+    </div>
+  </nav>
+
+  <!-- HERO (solid pastel) -->
+  <header class="py-5 hero bg-hero border-bottom">
+    <div class="container text-center">
+      <h1 class="display-6 fw-bold mb-2 text-primary">Turn Slides into Polished Quiz Decks</h1>
+      <p class="lead text-secondary mb-3">
+        Upload a PPTX or PDF, choose your mix of questions, and download a ready-to-present Q&amp;A deck.
+      </p>
+      <!-- Made by -->
+      <p class="text-muted small mb-4">Made by <strong>Mervin Ng</strong></p>
+
+      <a id="get-started" href="#generate" class="btn btn-primary px-4">Get Started</a>
+    </div>
   </header>
 
-  <main>
-    <form id="gen-form">
-      <div class="field">
-        <label>Lecture file (.pptx or .pdf)
-          <input type="file" name="file" accept=".pptx,.pdf" required />
-        </label>
-      </div>
-      <details>
-        <summary>Advanced options</summary>
-        <div class="grid">
-          <label>OCR Engine
-            <select name="ocr_engine">
-              <option value="easyocr">easyocr</option>
-            </select>
-          </label>
-          <label>Language <input type="text" name="language" value="en"></label>
-          <label>DPI <input type="number" name="dpi" value="180"></label>
-          <label>Model name <input type="text" name="model_name" value="gemini-1.5-flash"></label>
-          <label>Total questions <input type="number" name="total_questions" value="20"></label>
-          <label>Deck title <input type="text" name="deck_title" value="Auto Quiz"></label>
+  <!-- MAIN -->
+  <main id="generate" class="flex-grow-1 py-5">
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-lg-10 col-xl-9">
+          <div class="card shadow-sm" id="gen-card">
+            <div class="card-body">
+              <h3 class="card-title mb-3">Generate your quiz deck</h3>
+              <p class="text-secondary">Only the essentials — total questions, mix, difficulty, and an optional API key.</p>
+
+              <form id="gen-form" class="gy-3">
+                <!-- File -->
+                <div class="mb-3">
+                  <label class="form-label">Lecture file (.pptx / .pdf)</label>
+                  <input id="file-input" class="form-control" type="file" name="file" accept=".pptx,.pdf" required />
+                </div>
+
+                <div class="row g-4">
+                  <!-- Total questions -->
+                  <div class="col-md-6">
+                    <label class="form-label">Total questions <span class="text-secondary">(max 100)</span></label>
+                    <div class="d-flex align-items-center gap-3">
+                      <input id="q-total" class="form-range flex-grow-1" type="range" min="5" max="100" step="1" value="20" />
+                      <input id="q-total-num" class="form-control" type="number" min="1" max="100" value="20" style="width:110px" />
+                    </div>
+                  </div>
+
+                  <!-- Difficulty -->
+                  <div class="col-md-6">
+                    <label class="form-label">Difficulty</label>
+                    <div class="btn-group d-flex" role="group">
+                      <input type="radio" class="btn-check" name="difficulty" id="d1" value="easy">
+                      <label class="btn btn-outline-secondary" for="d1">easy</label>
+
+                      <input type="radio" class="btn-check" name="difficulty" id="d2" value="medium">
+                      <label class="btn btn-outline-secondary" for="d2">medium</label>
+
+                      <input type="radio" class="btn-check" name="difficulty" id="d3" value="hard">
+                      <label class="btn btn-outline-secondary" for="d3">hard</label>
+
+                      <input type="radio" class="btn-check" name="difficulty" id="d4" value="mixed" checked>
+                      <label class="btn btn-outline-secondary" for="d4">mixed</label>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Mix mode -->
+                <div class="mb-3 mt-3">
+                  <label class="form-label">Question mix</label>
+                  <div class="btn-group" role="group">
+                    <input type="radio" class="btn-check" name="mix_mode" id="m1" value="auto" checked>
+                    <label class="btn btn-outline-primary" for="m1">auto</label>
+
+                    <input type="radio" class="btn-check" name="mix_mode" id="m2" value="balanced">
+                    <label class="btn btn-outline-primary" for="m2">balanced</label>
+
+                    <input type="radio" class="btn-check" name="mix_mode" id="m3" value="custom">
+                    <label class="btn btn-outline-primary" for="m3">custom</label>
+                  </div>
+                </div>
+
+                <!-- Custom counts -->
+                <div id="custom-box" class="row g-3 d-none">
+                  <div class="col-md-3">
+                    <label class="form-label">MCQ</label>
+                    <input class="form-control" type="number" name="mcq_n" min="0" max="100" value="10">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Theory</label>
+                    <input class="form-control" type="number" name="theory_n" min="0" max="100" value="6">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Code-fill</label>
+                    <input class="form-control" type="number" name="codefill_n" min="0" max="100" value="4">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Fill-blank</label>
+                    <input class="form-control" type="number" name="fillblank_n" min="0" max="100" value="0">
+                  </div>
+                  <div class="col-12">
+                    <small id="custom-sum" class="text-secondary">Sum: 20</small>
+                  </div>
+                </div>
+
+                <!-- Options -->
+                <div class="form-check form-switch my-3">
+                  <input class="form-check-input" type="checkbox" id="exSwitch" name="include_explanations" checked>
+                  <label class="form-check-label" for="exSwitch">Include explanation slide after each answer</label>
+                </div>
+
+                <!-- API key (optional) -->
+                <div class="accordion mb-3" id="adv">
+                  <div class="accordion-item">
+                    <h2 class="accordion-header">
+                      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#adv1">
+                        Gemini API key (optional)
+                      </button>
+                    </h2>
+                    <div id="adv1" class="accordion-collapse collapse" data-bs-parent="#adv">
+                      <div class="accordion-body">
+                        <input class="form-control" type="password" name="gemini_api_key" placeholder="Prefer backend .env">
+                        <small class="text-secondary">Leave empty to use the backend <code>GEMINI_API_KEY</code>.</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Progress -->
+                <div id="progressWrap" class="progress mb-3 d-none" role="progressbar" aria-label="Generation progress" aria-valuemin="0" aria-valuemax="100">
+                  <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                </div>
+
+                <!-- Status -->
+                <div id="statusAlert" class="alert d-none" role="alert"></div>
+
+                <!-- Actions -->
+                <div class="d-flex align-items-center gap-3">
+                  <button type="submit" id="submit-btn" class="btn btn-primary px-4">Generate deck</button>
+                  <div id="download"></div>
+                </div>
+              </form>
+            </div>
+          </div>
+
         </div>
-      </details>
-
-      <div class="field">
-        <label>Gemini API Key (optional — backend .env preferred)
-          <input type="password" name="gemini_api_key" placeholder="If empty, backend .env is used" />
-        </label>
       </div>
-
-      <button type="submit" id="submit-btn">Generate Deck</button>
-    </form>
-
-    <div id="status" class="status"></div>
-    <div id="download" class="download"></div>
+    </div>
   </main>
 
-  <footer>
-    <small>Set API origin in <code>app.js</code> or use <code>?api=</code> query param.</small>
+  <!-- STICKY FOOTER -->
+  <footer class="border-top py-3 bg-white mt-auto">
+    <div class="container d-flex justify-content-between align-items-center">
+      <span class="text-secondary small">© <span id="year"></span> Quiz Deck</span>
+      <a class="small text-secondary" href="#generate">Back to top</a>
+    </div>
   </footer>
 
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+    // focus file input after smooth scroll
+    document.getElementById("get-started").addEventListener("click", () => {
+      setTimeout(() => document.getElementById("file-input").focus(), 450);
+    });
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
