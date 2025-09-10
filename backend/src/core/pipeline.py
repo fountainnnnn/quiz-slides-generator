@@ -78,28 +78,28 @@ def _extract_text_from_pdf(pdf_path: Path, use_ocr: bool = False, lang: str = "e
 
 
 # =========================
-# Gemini helpers (inline)
+# OpenAI helpers
 # =========================
 def _get_api_key(explicit: Optional[str]) -> Optional[str]:
-    return explicit or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return explicit or os.getenv("OPENAI_API_KEY")
 
 
-def _gemini_generate_qa(
+def _openai_generate_qa(
     text: str,
     total: int = 20,
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gpt-4o-mini",
     api_key: Optional[str] = None
 ) -> List[Tuple[str, str]]:
     """
-    Simple Q/A generator (question, answer) using Gemini, with robust parsing.
+    Simple Q/A generator (question, answer) using OpenAI, with robust parsing.
     """
     key = _get_api_key(api_key)
     if not key:
-        raise RuntimeError("Gemini API key missing. Set GEMINI_API_KEY or pass gemini_api_key.")
+        raise RuntimeError("OpenAI API key missing. Set OPENAI_API_KEY or pass openai_api_key.")
 
-    import google.generativeai as genai
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel(model_name)
+    from openai import OpenAI
+    client = OpenAI(api_key=key)
+
     sys = (
         "You are a question generator. Read the provided lecture text and produce concise study questions "
         "with their short, correct answers. Return STRICT JSON: a list of objects with keys 'q' and 'a'. "
@@ -107,17 +107,16 @@ def _gemini_generate_qa(
     )
     prompt = f"{sys}\n\nTarget count: {total}\nLecture text:\n{text[:12000]}"
 
-    resp = model.generate_content(prompt)
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
     out: List[Tuple[str, str]] = []
     try:
-        data = getattr(resp, "text", "") or ""
-        # strip code fences / grab first [...]
+        data = resp.choices[0].message.content or ""
         data = re.sub(r"^```(?:json)?\s*|\s*```$", "", data.strip(), flags=re.I | re.M)
-        if "[" not in data:
-            # try candidate path
-            if getattr(resp, "candidates", None):
-                data = resp.candidates[0].content.parts[0].text  # type: ignore
-        start = data.find('['); end = data.rfind(']')
+        start = data.find("["); end = data.rfind("]")
         if start != -1 and end != -1:
             data = data[start:end+1]
         arr = json.loads(data)
@@ -127,8 +126,8 @@ def _gemini_generate_qa(
             if q and a:
                 out.append((q, a))
     except Exception:
-        # Q:/A: fallback parse
-        text_resp = getattr(resp, "text", "") or ""
+        # fallback parse
+        text_resp = resp.choices[0].message.content or ""
         lines = [ln.strip() for ln in text_resp.splitlines() if ln.strip()]
         q, a = None, None
         for ln in lines:
@@ -143,7 +142,7 @@ def _gemini_generate_qa(
     return out[:total]
 
 
-def _gemini_explain_batch(
+def _openai_explain_batch(
     qa: List[Tuple[str, str]],
     text: str,
     model_name: str,
@@ -154,12 +153,10 @@ def _gemini_explain_batch(
     """
     key = _get_api_key(api_key)
     if not key:
-        # If you want to make explanations optional, return heuristics instead of raising:
         return [f"Explanation: {a[:200]}" for _, a in qa]
 
-    import google.generativeai as genai
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel(model_name)
+    from openai import OpenAI
+    client = OpenAI(api_key=key)
 
     pack = [{"q": q, "a": a} for q, a in qa]
     prompt = (
@@ -169,8 +166,11 @@ def _gemini_explain_batch(
         f"ITEMS:\n{json.dumps(pack, ensure_ascii=False)}"
     )
 
-    resp = model.generate_content(prompt)
-    data = getattr(resp, "text", "") or "[]"
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    data = resp.choices[0].message.content or "[]"
     data = re.sub(r"^```(?:json)?\s*|\s*```$", "", data.strip(), flags=re.I | re.M)
     start, end = data.find("["), data.rfind("]")
     if start != -1 and end != -1:
@@ -192,20 +192,23 @@ def _infer_title(
     api_key: Optional[str]
 ) -> str:
     """
-    Try Gemini for a concise 3–7 word title; otherwise heuristic or file name.
+    Try OpenAI for a concise 3–7 word title; otherwise heuristic or file name.
     """
     key = _get_api_key(api_key)
     if key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=key)
-            m = genai.GenerativeModel(model_name)
+            from openai import OpenAI
+            client = OpenAI(api_key=key)
             prompt = (
                 "Give a concise 3–7 word title for this lecture text. "
                 "Return ONLY the title, no quotes, no trailing punctuation.\n\n"
                 f"{lecture_text[:8000]}"
             )
-            t = (m.generate_content(prompt).text or "").replace("\n", " ").strip(" .,:;\"'")
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            t = (resp.choices[0].message.content or "").replace("\n", " ").strip(" .,:;\"'")
             if len(t.split()) >= 2:
                 return t[:80]
         except Exception:
@@ -276,7 +279,6 @@ def _build_qa_deck(
             _set_text_frame(sq.shapes.title.text_frame, f"Question {i}/{total}", 30, True, ACCENT_Q)
             _set_text_frame(sq.placeholders[1].text_frame, q, 28)
         except Exception:
-            # fallback to textboxes
             _set_textbox(sq, f"Question {i}/{total}", title=True, color=ACCENT_Q)
             _set_textbox(sq, q, top_inches=2.2)
 
@@ -330,8 +332,8 @@ def run_pipeline_end_to_end(
     language: str = "en",
     prefer_com: bool = False,
     dpi: int = 180,
-    gemini_api_key: Optional[str] = None,
-    model_name: str = "gemini-1.5-flash",
+    openai_api_key: Optional[str] = None,
+    model_name: str = "gpt-4o-mini",
     total_questions: int = 20,
     mix_mode: str = "balanced",
     mcq_n: int = 0,
@@ -383,16 +385,16 @@ def run_pipeline_end_to_end(
         raise ValueError("No text extracted from the document. Check OCR/inputs.")
 
     # --- Generate Q/A
-    qa = _gemini_generate_qa(lecture_text, total=total_questions, model_name=model_name, api_key=gemini_api_key)
+    qa = _openai_generate_qa(lecture_text, total=total_questions, model_name=model_name, api_key=openai_api_key)
     if not qa:
         raise ValueError("Q/A generation returned empty results.")
 
-    # --- Title (Gemini → heuristic) & Explanations (optional)
+    # --- Title & Explanations (optional)
     filename_stem = Path(name_hint or tmp_in.name).stem
-    auto_title = _infer_title(lecture_text, filename_stem, model_name, gemini_api_key)
+    auto_title = _infer_title(lecture_text, filename_stem, model_name, openai_api_key)
     final_title = deck_title if (deck_title and deck_title != "Auto Quiz") else auto_title
 
-    explanations = _gemini_explain_batch(qa, lecture_text, model_name, gemini_api_key) if include_thumbs else None
+    explanations = _openai_explain_batch(qa, lecture_text, model_name, openai_api_key) if include_thumbs else None
 
     # --- Build deck (higher-quality)
     pptx_bytes = _build_qa_deck(qa, title=final_title, explanations=explanations, source_name=filename_stem)
