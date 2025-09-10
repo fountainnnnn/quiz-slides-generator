@@ -1,5 +1,3 @@
-# backend/src/core/__init__.py
-
 # ---- Rendering ----
 from .render import (
     pptx_to_png_windows_com,
@@ -25,13 +23,12 @@ from .ocr import (
     ocr_image_paddle,
 )
 
-# ---- Gemini QG helpers ----
-from .gemini_qg import (
-    configure_gemini,
+# ---- LLM QG helpers (OpenAI) ----
+from .llm_qg import (
+    configure_openai,
     chunk_slides_for_qg,
     build_qg_prompt,
     safe_json_parse,
-    generate_qa as generate_questions_with_gemini,  # back-compat alias
     generate_qa,
     explain_batch,
     infer_title,
@@ -53,9 +50,9 @@ __all__ = [
     # ocr
     "init_easyocr_temp", "init_paddleocr", "get_ocr_engine",
     "ocr_image_easy", "ocr_image_paddle",
-    # gemini
-    "configure_gemini", "chunk_slides_for_qg", "build_qg_prompt",
-    "safe_json_parse", "generate_qa", "generate_questions_with_gemini",
+    # llm qg (openai)
+    "configure_openai", "chunk_slides_for_qg", "build_qg_prompt",
+    "safe_json_parse", "generate_qa",
     "explain_batch", "infer_title",
     # pptx
     "build_qa_deck",

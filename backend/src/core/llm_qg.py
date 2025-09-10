@@ -1,34 +1,32 @@
-# backend/src/core/gemini_qg.py
+# backend/src/core/openai_qg.py
 
 from typing import Any, Dict, List, Tuple, Optional
 from pathlib import Path
 import os, math, re, json as _json
+from openai import OpenAI
 
-GEMINI_DEFAULT_MODEL = "gemini-1.5-flash"
+OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 
 # ------------------------------------------------------------
-# Gemini configuration (env only — no embedded default key)
+# OpenAI configuration (env only — no embedded default key)
 # ------------------------------------------------------------
-def configure_gemini(api_key: Optional[str] = None):
+def configure_openai(api_key: Optional[str] = None) -> OpenAI:
     """
-    Configure google-generativeai with a required API key.
+    Configure OpenAI client with a required API key.
 
     Precedence:
       1) function arg `api_key`
-      2) env var GEMINI_API_KEY
-      3) env var GOOGLE_API_KEY
+      2) env var OPENAI_API_KEY
 
     If none is set, raises a clear error.
     """
-    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    key = api_key or os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError(
-            "Gemini API key not found. Create a key in Google AI Studio and set it on the backend "
-            "via environment variable GEMINI_API_KEY (recommended) or pass gemini_api_key in the request."
+            "OpenAI API key not found. Create one in OpenAI platform and set it on the backend "
+            "via environment variable OPENAI_API_KEY or pass api_key in the request."
         )
-    import google.generativeai as genai
-    genai.configure(api_key=key)
-    return genai
+    return OpenAI(api_key=key)
 
 
 # ------------------------------------------------------------
@@ -72,14 +70,17 @@ def chunk_slides_for_qg(slide_md_paths: List[str], max_chars_per_chunk: int = 80
         if buf_len + len(block) > max_chars_per_chunk and buf:
             chunks.append((idxs, "".join(buf)))
             buf, buf_len, idxs = [], 0, []
-        buf.append(block); buf_len += len(block); idxs.append(i)
+        buf.append(block)
+        buf_len += len(block)
+        idxs.append(i)
     if buf:
         chunks.append((idxs, "".join(buf)))
     return chunks
 
-def build_qg_prompt(slide_block: str, want_counts: Dict[str,int], difficulty: str):
+
+def build_qg_prompt(slide_block: str, want_counts: Dict[str, int], difficulty: str):
     total = max(1, sum(max(0, v) for v in want_counts.values()))
-    mix_desc = ", ".join([f"{k}:{v}" for k,v in want_counts.items() if v>0]) or "auto"
+    mix_desc = ", ".join([f"{k}:{v}" for k, v in want_counts.items() if v > 0]) or "auto"
     return f"""{QG_SYSTEM}
 
 Difficulty target: {difficulty}.
@@ -89,7 +90,6 @@ Slide content:
 {slide_block}
 
 JSON only."""
-# ------------------------------------------------------------
 
 
 # ------------------------------------------------------------
@@ -99,15 +99,12 @@ def safe_json_parse(s: str) -> List[Dict[str, Any]]:
     """Parse JSON robustly (handles ```json fences, leading/trailing noise)."""
     if not s:
         return []
-    # strip fences
-    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.I|re.M)
-    # try full parse
+    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.I | re.M)
     try:
         obj = _json.loads(s)
         return obj if isinstance(obj, list) else []
     except Exception:
         pass
-    # find first [...] block
     m = re.search(r"\[[\s\S]*\]", s)
     if m:
         try:
@@ -117,12 +114,14 @@ def safe_json_parse(s: str) -> List[Dict[str, Any]]:
             return []
     return []
 
+
 def _coerce_answer_to_str(ans: Any) -> str:
     if ans is None:
         return ""
     if isinstance(ans, list):
         return ", ".join([str(a).strip() for a in ans if str(a).strip()])
     return str(ans).strip()
+
 
 def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
@@ -134,13 +133,11 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
         if t not in {"mcq", "theory", "code_fill", "fill_blank"}:
             continue
 
-        # normalize fields
         question = (raw.get("question") or raw.get("text_with_blanks") or "").strip()
         answer = _coerce_answer_to_str(raw.get("answer"))
         if not question or not answer:
             continue
 
-        # options / code normalization
         opts: List[str] = []
         code = ""
         if t == "mcq":
@@ -150,8 +147,7 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
             opts = [str(o).strip() for o in opts_raw if str(o).strip()]
             if len(opts) < 3:
                 continue
-            # allow A/B/C/D mapping
-            if answer not in opts and answer.upper() in ["A","B","C","D","E"]:
+            if answer not in opts and answer.upper() in ["A", "B", "C", "D", "E"]:
                 idx = ord(answer.upper()) - 65
                 if 0 <= idx < len(opts):
                     answer = opts[idx]
@@ -161,7 +157,6 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
             code = (raw.get("code") or "").strip()
             opts = [str(o).strip() for o in (raw.get("options") or []) if str(o).strip()]
         else:
-            # theory / fill_blank: no options by default
             opts = []
 
         exp = (raw.get("explanation") or "").strip()
@@ -170,7 +165,6 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
         except Exception:
             src = idxs_fallback[0] if idxs_fallback else 1
 
-        # dedupe by (type, question[:160], answer[:160])
         k = (t, question[:160], answer[:160])
         if k in seen:
             continue
@@ -188,7 +182,6 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
             item["code"] = code[:4000]
         out.append(item)
     return out
-# ------------------------------------------------------------
 
 
 # ------------------------------------------------------------
@@ -197,39 +190,31 @@ def _clean_and_validate(items: List[Dict[str, Any]], idxs_fallback: List[int]) -
 def generate_qa(
     per_slide_md_paths: List[str],
     total_questions: int = 20,
-    mix: str = "auto",  # "auto" | "balanced" | "custom"
-    custom_counts: Optional[Dict[str,int]] = None,
+    mix: str = "auto",
+    custom_counts: Optional[Dict[str, int]] = None,
     difficulty: str = "mixed",
-    model_name: str = GEMINI_DEFAULT_MODEL,
-    api_key: Optional[str] = None
+    model_name: str = OPENAI_DEFAULT_MODEL,
+    api_key: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Generate questions using Gemini (key from env or arg). Strict JSON parsing with validation.
+    Generate questions using OpenAI (key from env or arg). Strict JSON parsing with validation.
     Supports types: mcq, theory, code_fill, fill_blank.
     """
-    genai = configure_gemini(api_key)
-    model = genai.GenerativeModel(model_name)
+    client = configure_openai(api_key)
 
-    # desired mix
     if mix == "custom" and custom_counts:
         desired = {
-            "mcq":      max(0, int(custom_counts.get("mcq", 0))),
-            "theory":   max(0, int(custom_counts.get("theory", 0))),
-            "code_fill":max(0, int(custom_counts.get("code_fill", 0))),
-            "fill_blank":max(0, int(custom_counts.get("fill_blank", 0))),
+            "mcq": max(0, int(custom_counts.get("mcq", 0))),
+            "theory": max(0, int(custom_counts.get("theory", 0))),
+            "code_fill": max(0, int(custom_counts.get("code_fill", 0))),
+            "fill_blank": max(0, int(custom_counts.get("fill_blank", 0))),
         }
         if sum(desired.values()) <= 0:
             desired = {"mcq": total_questions}
     elif mix == "balanced":
         q4 = max(1, total_questions // 4)
-        desired = {
-            "mcq": q4,
-            "theory": q4,
-            "code_fill": q4,
-            "fill_blank": total_questions - 3*q4
-        }
+        desired = {"mcq": q4, "theory": q4, "code_fill": q4, "fill_blank": total_questions - 3 * q4}
     else:
-        # auto: bias toward MCQ but include others
         mcq = math.ceil(total_questions * 0.45)
         theory = max(0, math.ceil(total_questions * 0.25))
         code_fill = max(0, math.ceil(total_questions * 0.15))
@@ -244,19 +229,15 @@ def generate_qa(
         if remaining <= 0:
             break
 
-        # proportional allocation by number of slides in chunk
         weight = max(1, len(idxs))
         per_chunk = max(
-            1,
-            min(remaining, math.ceil(total_questions * (weight / max(1, len(per_slide_md_paths)))))
+            1, min(remaining, math.ceil(total_questions * (weight / max(1, len(per_slide_md_paths)))))
         )
 
-        # scale desired mix into this chunk
         want_counts = desired.copy()
         s = sum(want_counts.values()) or 1
         for k in want_counts:
             want_counts[k] = max(0, round(want_counts[k] * per_chunk / s))
-        # fix rounding drift
         drift = per_chunk - sum(want_counts.values())
         for k in ["mcq", "theory", "code_fill", "fill_blank"]:
             if drift == 0:
@@ -265,15 +246,15 @@ def generate_qa(
             drift -= 1
 
         prompt = build_qg_prompt(block, want_counts, difficulty)
-        resp = model.generate_content(prompt)
-        text = getattr(resp, "text", None) or (
-            resp.candidates[0].content.parts[0].text if getattr(resp, "candidates", None) else ""
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "system", "content": QG_SYSTEM}, {"role": "user", "content": prompt}],
         )
+        text = resp.choices[0].message.content or ""
 
         raw = safe_json_parse(text)
         clean = _clean_and_validate(raw, idxs)
 
-        # cap per chunk, append
         clean = clean[:per_chunk]
         results.extend(clean)
         remaining -= len(clean)
@@ -291,18 +272,15 @@ def explain_batch(
     2–3 sentence explanation per QA (same order).
     Requires API key (env/arg). If missing, raises; keep the call guarded in pipeline if you allow offline mode.
     """
-    genai = configure_gemini(api_key)
-    import google.generativeai as genai_pkg  # for typing clarity
-    m = genai_pkg.GenerativeModel(model_name)
+    client = configure_openai(api_key)
 
-    # normalize QA tuples
-    items: List[Tuple[str,str]] = []
+    items: List[Tuple[str, str]] = []
     for it in qa:
         if isinstance(it, dict):
             q = str(it.get("question", "")).strip()
             a = str(it.get("answer", "")).strip()
         else:
-            q, a = it  # type: ignore
+            q, a = it
         if q and a:
             items.append((q, a))
     pack = [{"q": q, "a": a} for q, a in items]
@@ -319,16 +297,18 @@ def explain_batch(
         f"ITEMS:\n{_json.dumps(pack, ensure_ascii=False)}"
     )
 
-    resp = m.generate_content(prompt)
-    data = getattr(resp, "text", "") or "[]"
+    resp = client.chat.completions.create(
+        model=model_name or OPENAI_DEFAULT_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    data = resp.choices[0].message.content or "[]"
     start, end = data.find("["), data.rfind("]")
     if start != -1 and end != -1:
-        data = data[start:end+1]
+        data = data[start : end + 1]
     try:
         arr = _json.loads(data)
         out = [str(x) for x in arr]
         if len(out) != len(items):
-            # length mismatch → minimal fallback (still useful)
             return [f"Explanation: {a[:200]}" for _, a in items]
         return out
     except Exception:
@@ -342,27 +322,26 @@ def infer_title(
     api_key: Optional[str],
 ) -> str:
     """
-    Try a concise 3–7 word title via Gemini; else heuristic or file name.
+    Try a concise 3–7 word title via OpenAI; else heuristic or file name.
     Requires API key (env/arg). If missing, returns heuristic.
     """
-    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if key:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=key)
-            m = genai.GenerativeModel(model_name)
-            prompt = (
-                "Give a concise 3–7 word title for this lecture text. "
-                "Return ONLY the title, no quotes, no trailing punctuation.\n\n"
-                f"{lecture_text[:8000]}"
-            )
-            t = (m.generate_content(prompt).text or "").replace("\n", " ").strip(" .,:;\"'")
-            if len(t.split()) >= 2:
-                return t[:80]
-        except Exception:
-            pass
+    try:
+        client = configure_openai(api_key)
+        prompt = (
+            "Give a concise 3–7 word title for this lecture text. "
+            "Return ONLY the title, no quotes, no trailing punctuation.\n\n"
+            f"{lecture_text[:8000]}"
+        )
+        resp = client.chat.completions.create(
+            model=model_name or OPENAI_DEFAULT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        t = (resp.choices[0].message.content or "").replace("\n", " ").strip(" .,:;\"'")
+        if len(t.split()) >= 2:
+            return t[:80]
+    except Exception:
+        pass
 
-    # Heuristic fallback: first decent line
     for line in lecture_text.splitlines():
         s = re.sub(r"[^A-Za-z0-9 :/\-\(\)\[\]]+", "", line).strip()
         if len(s.split()) >= 2 and len(s) >= 10:
