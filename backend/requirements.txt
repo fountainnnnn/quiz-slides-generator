@@ -11,8 +11,9 @@ pymupdf==1.24.9
 pypdfium2==4.30.0
 
 easyocr==1.7.2
-torch==2.2.2
-torchvision==0.17.2
+# Let EasyOCR install a compatible torch/torchvision
+# torch==2.2.2
+# torchvision==0.17.2
 
 numpy==1.26.4
 imageio==2.37.0
@@ -26,5 +27,3 @@ google-auth==2.40.3
 google-auth-httplib2==0.2.0
 googleapis-common-protos==1.70.0
 protobuf==4.25.3
-
-ipython==8.26.0
