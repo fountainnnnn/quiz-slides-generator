@@ -111,3 +111,7 @@ tmp/
 temp/
 *.tmp
 ~$*  # temp Office files
+
+==== Hugging face API ===
+# Ignore Hugging Face Space repo clone
+quiz-generator/
