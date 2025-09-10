@@ -2,81 +2,8 @@
 const BACKEND_BASE_URL =
   new URLSearchParams(location.search).get("api") ||
   "https://crystallizedcrust-quiz-generator.hf.space";
-// DOM
-const form = document.getElementById("gen-form");
-const statusAlert = document.getElementById("statusAlert");
-const dlEl = document.getElementById("download");
-const submitBtn = document.getElementById("submit-btn");
 
-const qTotalRange = document.getElementById("q-total");
-const qTotalNum = document.getElementById("q-total-num");
-const customBox = document.getElementById("custom-box");
-const customSum = document.getElementById("custom-sum");
-
-const progressWrap = document.getElementById("progressWrap");
-const progressBar = document.getElementById("progressBar");
-
-// year in footer
-document.getElementById("year").textContent = new Date().getFullYear();
-
-// sync total range + number
-function syncTotals(fromRange) {
-  const val = parseInt(fromRange ? qTotalRange.value : qTotalNum.value, 10) || 1;
-  const clamped = Math.max(1, Math.min(100, val));
-  qTotalRange.value = clamped;
-  qTotalNum.value = clamped;
-  if (!customBox.classList.contains("d-none")) updateCustomSum();
-}
-qTotalRange.addEventListener("input", () => syncTotals(true));
-qTotalNum.addEventListener("input", () => syncTotals(false));
-
-// mix mode show/hide custom
-form.addEventListener("change", (e) => {
-  if (e.target.name === "mix_mode") {
-    const isCustom = e.target.value === "custom";
-    customBox.classList.toggle("d-none", !isCustom);
-    updateCustomSum();
-  }
-});
-
-function updateCustomSum() {
-  if (customBox.classList.contains("d-none")) return;
-  const mcq = +form.mcq_n.value || 0;
-  const th  = +form.theory_n.value || 0;
-  const cf  = +form.codefill_n.value || 0;
-  const fb  = +form.fillblank_n.value || 0;
-  const total = +qTotalNum.value || 0;
-  customSum.textContent = `Sum: ${mcq + th + cf + fb} / ${total}`;
-}
-
-let timer = null;
-function startProgress() {
-  progressWrap.classList.remove("d-none");
-  progressBar.style.width = "2%";
-  progressBar.classList.add("progress-bar-animated");
-  let pct = 2;
-  timer = setInterval(() => {
-    pct = Math.min(90, pct + Math.random() * 6);
-    progressBar.style.width = pct + "%";
-  }, 250);
-}
-function finishProgress(success = true) {
-  if (timer) clearInterval(timer);
-  progressBar.classList.remove("progress-bar-animated");
-  progressBar.style.width = "100%";
-  progressBar.classList.toggle("bg-success", success);
-  progressBar.classList.toggle("bg-danger", !success);
-  setTimeout(() => {
-    progressWrap.classList.add("d-none");
-    progressBar.style.width = "0%";
-    progressBar.classList.remove("bg-success", "bg-danger");
-  }, 1200);
-}
-
-function showStatus(message, type = "info") {
-  statusAlert.className = `alert alert-${type}`;
-  statusAlert.textContent = message;
-}
+// ...
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -107,8 +34,10 @@ form.addEventListener("submit", async (e) => {
     fd.append("codefill_n", form.codefill_n.value || "0");
     fd.append("fillblank_n", form.fillblank_n.value || "0");
   }
-  if (form.gemini_api_key.value) {
-    fd.append("gemini_api_key", form.gemini_api_key.value);
+
+  // 🔄 changed from gemini_api_key → openai_api_key
+  if (form.openai_api_key && form.openai_api_key.value) {
+    fd.append("openai_api_key", form.openai_api_key.value);
   }
 
   try {
