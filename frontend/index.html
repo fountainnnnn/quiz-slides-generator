@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slides → Quiz Deck Generator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Slides → Quiz Deck Generator</h1>
+    <p>Upload PPTX/PDF. The server extracts content, uses Gemini for Q&A, and returns a downloadable PPTX.</p>
+  </header>
+
+  <main>
+    <form id="gen-form">
+      <div class="field">
+        <label>Lecture file (.pptx or .pdf)
+          <input type="file" name="file" accept=".pptx,.pdf" required />
+        </label>
+      </div>
+      <details>
+        <summary>Advanced options</summary>
+        <div class="grid">
+          <label>OCR Engine
+            <select name="ocr_engine">
+              <option value="easyocr">easyocr</option>
+            </select>
+          </label>
+          <label>Language <input type="text" name="language" value="en"></label>
+          <label>DPI <input type="number" name="dpi" value="180"></label>
+          <label>Model name <input type="text" name="model_name" value="gemini-1.5-flash"></label>
+          <label>Total questions <input type="number" name="total_questions" value="20"></label>
+          <label>Deck title <input type="text" name="deck_title" value="Auto Quiz"></label>
+        </div>
+      </details>
+
+      <div class="field">
+        <label>Gemini API Key (optional — backend .env preferred)
+          <input type="password" name="gemini_api_key" placeholder="If empty, backend .env is used" />
+        </label>
+      </div>
+
+      <button type="submit" id="submit-btn">Generate Deck</button>
+    </form>
+
+    <div id="status" class="status"></div>
+    <div id="download" class="download"></div>
+  </main>
+
+  <footer>
+    <small>Set API origin in <code>app.js</code> or use <code>?api=</code> query param.</small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
