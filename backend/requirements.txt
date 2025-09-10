@@ -23,7 +23,6 @@ opencv-python-headless==4.10.0.84
 
 # --- LLM client ---
 openai==1.107.1
---force-reinstall
 
 # --- Google auth libs (only if you still need them for other APIs) ---
 google-api-core==2.25.1
