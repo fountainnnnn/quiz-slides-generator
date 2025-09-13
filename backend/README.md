@@ -1,5 +1,5 @@
 
-# Backend — Slides → Quiz Deck API (No Gradio)
+# Backend — Slides → Quiz Deck API
 
 Windows-friendly build. Absolute download URLs returned from `/generate`.
 
