@@ -3,30 +3,34 @@
 from typing import Any, Dict, List, Tuple, Optional
 from pathlib import Path
 import os, math, re, json as _json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 
-OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
+DEEPSEEK_DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 # ------------------------------------------------------------
 # OpenAI configuration (env only — no embedded default key)
 # ------------------------------------------------------------
-def configure_openai(api_key: Optional[str] = None) -> OpenAI:
+def configure_deepseek(api_key: Optional[str] = None) -> OpenAI:
     """
     Configure OpenAI client with a required API key.
 
     Precedence:
       1) function arg `api_key`
-      2) env var OPENAI_API_KEY
+      2) env var DEEPSEEK_API_KEY
 
     If none is set, raises a clear error.
     """
-    key = api_key or os.environ.get("OPENAI_API_KEY")
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         raise RuntimeError(
-            "OpenAI API key not found. Create one in OpenAI platform and set it on the backend "
-            "via environment variable OPENAI_API_KEY or pass api_key in the request."
+            "DeepSeek API key not found. Set DEEPSEEK_API_KEY on the backend "
+            "or pass api_key in the request."
         )
-    return OpenAI(api_key=key)
+    return OpenAI(
+        api_key=key,
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    )
 
 
 # ------------------------------------------------------------
@@ -89,7 +93,7 @@ Generate exactly {total} items with mix {mix_desc}. If the content cannot suppor
 Slide content:
 {slide_block}
 
-JSON only."""
+Return JSON only as {{"questions":[...]}}."""
 
 
 # ------------------------------------------------------------
@@ -102,7 +106,10 @@ def safe_json_parse(s: str) -> List[Dict[str, Any]]:
     s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.I | re.M)
     try:
         obj = _json.loads(s)
-        return obj if isinstance(obj, list) else []
+        if isinstance(obj, list):
+            return obj
+        if isinstance(obj, dict) and isinstance(obj.get("questions"), list):
+            return obj["questions"]
     except Exception:
         pass
     m = re.search(r"\[[\s\S]*\]", s)
@@ -113,6 +120,30 @@ def safe_json_parse(s: str) -> List[Dict[str, Any]]:
         except Exception:
             return []
     return []
+
+
+def _count_types(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"mcq": 0, "theory": 0, "code_fill": 0, "fill_blank": 0}
+    for item in items:
+        t = str(item.get("type", "")).lower().strip()
+        if t in counts:
+            counts[t] += 1
+    return counts
+
+
+def _deficit_counts(desired: Dict[str, int], current: Dict[str, int], remaining: int) -> Dict[str, int]:
+    deficits = {k: max(0, int(desired.get(k, 0)) - int(current.get(k, 0))) for k in desired}
+    if sum(deficits.values()) == 0:
+        deficits = {"mcq": remaining, "theory": 0, "code_fill": 0, "fill_blank": 0}
+    while sum(deficits.values()) > remaining:
+        for key in ["mcq", "theory", "code_fill", "fill_blank"]:
+            if sum(deficits.values()) <= remaining:
+                break
+            if deficits.get(key, 0) > 0:
+                deficits[key] -= 1
+    while sum(deficits.values()) < remaining:
+        deficits["theory"] = deficits.get("theory", 0) + 1
+    return deficits
 
 
 def _coerce_answer_to_str(ans: Any) -> str:
@@ -193,14 +224,14 @@ def generate_qa(
     mix: str = "auto",
     custom_counts: Optional[Dict[str, int]] = None,
     difficulty: str = "mixed",
-    model_name: str = OPENAI_DEFAULT_MODEL,
+    model_name: str = DEEPSEEK_DEFAULT_MODEL,
     api_key: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Generate questions using OpenAI (key from env or arg). Strict JSON parsing with validation.
     Supports types: mcq, theory, code_fill, fill_blank.
     """
-    client = configure_openai(api_key)
+    client = configure_deepseek(api_key)
 
     if mix == "custom" and custom_counts:
         desired = {
@@ -212,8 +243,9 @@ def generate_qa(
         if sum(desired.values()) <= 0:
             desired = {"mcq": total_questions}
     elif mix == "balanced":
-        q4 = max(1, total_questions // 4)
-        desired = {"mcq": q4, "theory": q4, "code_fill": q4, "fill_blank": total_questions - 3 * q4}
+        types = ["mcq", "theory", "code_fill", "fill_blank"]
+        base, remainder = divmod(max(1, total_questions), len(types))
+        desired = {kind: base + (1 if idx < remainder else 0) for idx, kind in enumerate(types)}
     else:
         mcq = math.ceil(total_questions * 0.45)
         theory = max(0, math.ceil(total_questions * 0.25))
@@ -222,42 +254,73 @@ def generate_qa(
         desired = {"mcq": mcq, "theory": theory, "code_fill": code_fill, "fill_blank": fill_blank}
 
     chunks = chunk_slides_for_qg(per_slide_md_paths, max_chars_per_chunk=8000)
-    remaining = total_questions
     results: List[Dict[str, Any]] = []
+    focused_batch_size = max(1, min(int(os.getenv("QUIZ_GENERATOR_BATCH_SIZE", "5")), total_questions))
+    max_parallel_calls = max(1, int(os.getenv("QUIZ_GENERATOR_MAX_PARALLEL_CALLS", "4")))
 
+    def request_chunk(idxs: List[int], block: str, want_counts: Dict[str, int]) -> List[Dict[str, Any]]:
+        prompt = build_qg_prompt(block, want_counts, difficulty)
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "system", "content": QG_SYSTEM}, {"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        text = resp.choices[0].message.content or ""
+        return _clean_and_validate(safe_json_parse(text), idxs)
+
+    work_items: List[Tuple[List[int], str, Dict[str, int]]] = []
     for idxs, block in chunks:
-        if remaining <= 0:
-            break
-
         weight = max(1, len(idxs))
-        per_chunk = max(
-            1, min(remaining, math.ceil(total_questions * (weight / max(1, len(per_slide_md_paths)))))
+        chunk_total = max(
+            1, min(total_questions, math.ceil(total_questions * (weight / max(1, len(per_slide_md_paths)))))
         )
 
         want_counts = desired.copy()
         s = sum(want_counts.values()) or 1
         for k in want_counts:
-            want_counts[k] = max(0, round(want_counts[k] * per_chunk / s))
-        drift = per_chunk - sum(want_counts.values())
+            want_counts[k] = max(0, round(want_counts[k] * chunk_total / s))
+        drift = chunk_total - sum(want_counts.values())
         for k in ["mcq", "theory", "code_fill", "fill_blank"]:
             if drift == 0:
                 break
             want_counts[k] += 1
             drift -= 1
 
-        prompt = build_qg_prompt(block, want_counts, difficulty)
-        resp = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "system", "content": QG_SYSTEM}, {"role": "user", "content": prompt}],
-        )
-        text = resp.choices[0].message.content or ""
+        expanded: List[str] = []
+        for key in ["mcq", "theory", "code_fill", "fill_blank"]:
+            expanded.extend([key] * want_counts.get(key, 0))
+        for start in range(0, len(expanded), focused_batch_size):
+            batch_counts = {"mcq": 0, "theory": 0, "code_fill": 0, "fill_blank": 0}
+            for key in expanded[start:start + focused_batch_size]:
+                batch_counts[key] += 1
+            work_items.append((idxs, block, batch_counts))
 
-        raw = safe_json_parse(text)
-        clean = _clean_and_validate(raw, idxs)
+    ordered_results: List[Tuple[int, List[Dict[str, Any]]]] = []
+    with ThreadPoolExecutor(max_workers=max_parallel_calls) as pool:
+        futures = {
+            pool.submit(request_chunk, idxs, block, counts): idx
+            for idx, (idxs, block, counts) in enumerate(work_items)
+        }
+        for future in as_completed(futures):
+            try:
+                ordered_results.append((futures[future], future.result()))
+            except Exception:
+                continue
+    for _, chunk_results in sorted(ordered_results, key=lambda item: item[0]):
+        results.extend(chunk_results)
 
-        clean = clean[:per_chunk]
-        results.extend(clean)
-        remaining -= len(clean)
+    results = results[:total_questions]
+    attempts = 0
+    while len(results) < total_questions and attempts < 2 and chunks:
+        attempts += 1
+        remaining = total_questions - len(results)
+        counts = _deficit_counts(desired, _count_types(results), remaining)
+        idxs, block = chunks[0]
+        try:
+            results.extend(request_chunk(idxs, block, counts)[:remaining])
+        except Exception:
+            break
 
     return results[:total_questions]
 
@@ -272,7 +335,7 @@ def explain_batch(
     2–3 sentence explanation per QA (same order).
     Requires API key (env/arg). If missing, raises; keep the call guarded in pipeline if you allow offline mode.
     """
-    client = configure_openai(api_key)
+    client = configure_deepseek(api_key)
 
     items: List[Tuple[str, str]] = []
     for it in qa:
@@ -298,8 +361,9 @@ def explain_batch(
     )
 
     resp = client.chat.completions.create(
-        model=model_name or OPENAI_DEFAULT_MODEL,
+        model=model_name or DEEPSEEK_DEFAULT_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        extra_body={"thinking": {"type": "disabled"}},
     )
     data = resp.choices[0].message.content or "[]"
     start, end = data.find("["), data.rfind("]")
@@ -326,15 +390,16 @@ def infer_title(
     Requires API key (env/arg). If missing, returns heuristic.
     """
     try:
-        client = configure_openai(api_key)
+        client = configure_deepseek(api_key)
         prompt = (
             "Give a concise 3–7 word title for this lecture text. "
             "Return ONLY the title, no quotes, no trailing punctuation.\n\n"
             f"{lecture_text[:8000]}"
         )
         resp = client.chat.completions.create(
-            model=model_name or OPENAI_DEFAULT_MODEL,
+            model=model_name or DEEPSEEK_DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
+            extra_body={"thinking": {"type": "disabled"}},
         )
         t = (resp.choices[0].message.content or "").replace("\n", " ").strip(" .,:;\"'")
         if len(t.split()) >= 2:

@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Tuple, Optional
-import os, io, json, re
+import os, io, json, re, tempfile
 from pathlib import Path
 from datetime import date
 
@@ -8,97 +8,46 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 
-import fitz
-
-# Optional EasyOCR (only used for bitmap PDFs/images)
-try:
-    import easyocr  # type: ignore
-    _easyocr_reader = None
-except Exception:
-    easyocr = None
-    _easyocr_reader = None
+from .vision import read_document
 
 
 # =========================
-# Extraction helpers
+# Extraction
 # =========================
-def _extract_text_from_pptx(pptx_path: Path) -> str:
-    prs = Presentation(pptx_path)
-    chunks: List[str] = []
-    for slide in prs.slides:
-        # shapes text
-        for shape in slide.shapes:
-            try:
-                if hasattr(shape, "text") and shape.text:
-                    chunks.append(shape.text)
-            except Exception:
-                continue
-        # notes
-        try:
-            if slide.has_notes_slide and slide.notes_slide and slide.notes_slide.notes_text_frame:
-                nt = slide.notes_slide.notes_text_frame.text
-                if nt:
-                    chunks.append(nt)
-        except Exception:
-            pass
-    return "\n\n".join(chunks)
-
-
-def _extract_text_from_pdf(pdf_path: Path, use_ocr: bool = False, lang: str = "en") -> str:
-    doc = fitz.open(pdf_path)
-    parts: List[str] = []
-    has_text = False
-    for page in doc:
-        txt = page.get_text().strip()
-        if txt:
-            has_text = True
-            parts.append(txt)
-    if has_text or not use_ocr:
-        return "\n\n".join(parts)
-
-    # OCR path
-    if easyocr is None:
-        return "\n\n".join(parts)
-
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        _easyocr_reader = easyocr.Reader([lang], gpu=False)
-
-    oc_parts: List[str] = []
-    for page in doc:
-        pix = page.get_pixmap(dpi=220)
-        import numpy as np, cv2  # local import
-        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
-        if img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        results = _easyocr_reader.readtext(img, detail=0, paragraph=True)
-        if results:
-            oc_parts.append("\n".join(results))
-    return "\n\n".join(oc_parts)
+def _extract_lecture_text(path: Path, work_dir: Path, dpi: int, language: str) -> str:
+    """
+    Per-page Markdown from the vision page reader (falls back to the embedded
+    text layer when no vision provider is configured), joined in page order.
+    """
+    pages = read_document(path, work_dir, dpi=dpi, language=language)
+    return "\n\n".join(f"<!-- PAGE {i} -->\n{text}" for i, text in enumerate(pages, 1) if text.strip())
 
 
 # =========================
-# OpenAI helpers
+# DeepSeek helpers
 # =========================
 def _get_api_key(explicit: Optional[str]) -> Optional[str]:
-    return explicit or os.getenv("OPENAI_API_KEY")
+    return explicit or os.getenv("DEEPSEEK_API_KEY")
 
 
 def _openai_generate_qa(
     text: str,
     total: int = 20,
-    model_name: str = "gpt-4o-mini",
+    model_name: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
     api_key: Optional[str] = None
 ) -> List[Tuple[str, str]]:
     """
-    Simple Q/A generator (question, answer) using OpenAI, with robust parsing.
+    Simple Q/A generator (question, answer) using DeepSeek, with robust parsing.
     """
     key = _get_api_key(api_key)
     if not key:
-        raise RuntimeError("OpenAI API key missing. Set OPENAI_API_KEY or pass openai_api_key.")
+        raise RuntimeError("DeepSeek API key missing. Set DEEPSEEK_API_KEY or pass an API key.")
 
     from openai import OpenAI
-    client = OpenAI(api_key=key)
+    client = OpenAI(
+        api_key=key,
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    )
 
     sys = (
         "You are a question generator. Read the provided lecture text and produce concise study questions "
@@ -109,7 +58,8 @@ def _openai_generate_qa(
 
     resp = client.chat.completions.create(
         model=model_name,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        extra_body={"thinking": {"type": "disabled"}},
     )
 
     out: List[Tuple[str, str]] = []
@@ -156,7 +106,10 @@ def _openai_explain_batch(
         return [f"Explanation: {a[:200]}" for _, a in qa]
 
     from openai import OpenAI
-    client = OpenAI(api_key=key)
+    client = OpenAI(
+        api_key=key,
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    )
 
     pack = [{"q": q, "a": a} for q, a in qa]
     prompt = (
@@ -168,7 +121,8 @@ def _openai_explain_batch(
 
     resp = client.chat.completions.create(
         model=model_name,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        extra_body={"thinking": {"type": "disabled"}},
     )
     data = resp.choices[0].message.content or "[]"
     data = re.sub(r"^```(?:json)?\s*|\s*```$", "", data.strip(), flags=re.I | re.M)
@@ -198,7 +152,10 @@ def _infer_title(
     if key:
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=key)
+            client = OpenAI(
+                api_key=key,
+                base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            )
             prompt = (
                 "Give a concise 3–7 word title for this lecture text. "
                 "Return ONLY the title, no quotes, no trailing punctuation.\n\n"
@@ -206,7 +163,8 @@ def _infer_title(
             )
             resp = client.chat.completions.create(
                 model=model_name,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
+                extra_body={"thinking": {"type": "disabled"}},
             )
             t = (resp.choices[0].message.content or "").replace("\n", " ").strip(" .,:;\"'")
             if len(t.split()) >= 2:
@@ -328,26 +286,28 @@ def _set_textbox(slide, text: str, title: bool = False,
 # =========================
 def run_pipeline_end_to_end(
     pptx_file,
-    ocr_engine: str = "easyocr",
+    ocr_engine: str = "vision",   # deprecated: ignored, kept for API compatibility
     language: str = "en",
     prefer_com: bool = False,
     dpi: int = 180,
     openai_api_key: Optional[str] = None,
-    model_name: str = "gpt-4o-mini",
+    model_name: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
     total_questions: int = 20,
     mix_mode: str = "balanced",
     mcq_n: int = 0,
     theory_n: int = 0,
     codefill_n: int = 0,
+    fillblank_n: int = 0,
     difficulty: str = "mixed",
     deck_title: str = "Auto Quiz",
-    include_thumbs: bool = True   # repurposed: include explanations when True
+    include_thumbs: bool = True,  # repurposed: include explanations when True
+    source_name: Optional[str] = None,  # display name for the deck subtitle/title fallback
 ):
     """
     Returns: (pptx_bytes, zip_path, out_dir, msg)
     """
-    # --- Save the upload with the correct extension
-    tmp_dir = Path(os.getenv("TMP", str(Path.cwd() / "tmp")))
+    # --- Save the upload with the correct extension in a request-scoped temp dir
+    tmp_dir = Path(tempfile.mkdtemp(prefix="quizdeck_"))
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     ext = ""
@@ -375,22 +335,71 @@ def run_pipeline_end_to_end(
     tmp_in = tmp_dir / f"input_upload{ext}"
     tmp_in.write_bytes(data or b"")
 
-    # --- Extract text
-    if ext == ".pptx":
-        lecture_text = _extract_text_from_pptx(tmp_in)
-    else:
-        lecture_text = _extract_text_from_pdf(tmp_in, use_ocr=(ocr_engine == "easyocr"), lang=language)
+    # --- Extract text (vision page reader, text-layer fallback)
+    lecture_text = _extract_lecture_text(tmp_in, tmp_dir, dpi=dpi, language=language)
 
     if not lecture_text.strip():
-        raise ValueError("No text extracted from the document. Check OCR/inputs.")
+        raise ValueError(
+            "No text extracted from the document. If it is a scanned PDF, configure a vision "
+            "provider (VISION_API_KEY, OPENROUTER_API_KEY or OPENAI_API_KEY)."
+        )
 
-    # --- Generate Q/A
+    total_questions = max(1, min(int(total_questions), 50))
+    mix_mode = (mix_mode or "balanced").lower()
+    custom_counts = None
+    if mix_mode == "custom":
+        custom_counts = {
+            "mcq": max(0, int(mcq_n)),
+            "theory": max(0, int(theory_n)),
+            "code_fill": max(0, int(codefill_n)),
+            "fill_blank": max(0, int(fillblank_n)),
+        }
+        if sum(custom_counts.values()) != total_questions:
+            raise ValueError("Custom question counts must add up to total_questions.")
+
+    # --- Generate structured Q/A with question-type mix controls
+    try:
+        from .llm_qg import generate_qa as generate_structured_qa, infer_title as infer_structured_title
+        from .pptx_export import build_qa_deck as build_structured_deck
+
+        md_path = tmp_dir / "source.md"
+        md_path.write_text(f"<!-- SLIDE 1 -->\n{lecture_text}", encoding="utf-8")
+        qa_items = generate_structured_qa(
+            per_slide_md_paths=[str(md_path)],
+            total_questions=total_questions,
+            mix=mix_mode,
+            custom_counts=custom_counts,
+            difficulty=difficulty,
+            model_name=model_name,
+            api_key=openai_api_key,
+        )
+        if not qa_items:
+            raise ValueError("Q/A generation returned empty results.")
+
+        filename_stem = Path(source_name or name_hint or tmp_in.name).stem
+        auto_title = infer_structured_title(lecture_text, filename_stem, model_name, openai_api_key)
+        final_title = deck_title if (deck_title and deck_title != "Auto Quiz") else auto_title
+        out_path = tmp_dir / f"{filename_stem}_quizdeck.pptx"
+        build_structured_deck(
+            qa=qa_items,
+            slide_images=[],
+            out_path=str(out_path),
+            deck_title=final_title,
+            include_thumbnails=False,
+            include_explanations=include_thumbs,
+            source_name=filename_stem,
+        )
+        return out_path.read_bytes(), None, str(tmp_dir), "ok"
+    except Exception as structured_error:
+        # Keep a simpler Q/A fallback for older models or schema drift.
+        print(f"[WARN] Structured quiz generation failed; falling back to simple Q/A: {structured_error}")
+
     qa = _openai_generate_qa(lecture_text, total=total_questions, model_name=model_name, api_key=openai_api_key)
     if not qa:
         raise ValueError("Q/A generation returned empty results.")
 
     # --- Title & Explanations (optional)
-    filename_stem = Path(name_hint or tmp_in.name).stem
+    filename_stem = Path(source_name or name_hint or tmp_in.name).stem
     auto_title = _infer_title(lecture_text, filename_stem, model_name, openai_api_key)
     final_title = deck_title if (deck_title and deck_title != "Auto Quiz") else auto_title
 
@@ -398,4 +407,4 @@ def run_pipeline_end_to_end(
 
     # --- Build deck (higher-quality)
     pptx_bytes = _build_qa_deck(qa, title=final_title, explanations=explanations, source_name=filename_stem)
-    return pptx_bytes, None, None, "ok"
+    return pptx_bytes, None, str(tmp_dir), "ok"

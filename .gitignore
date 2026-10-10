@@ -115,3 +115,5 @@ temp/
 ==== Hugging face API ===
 # Ignore Hugging Face Space repo clone
 quiz-generator/
+*.pyc
+outputs/

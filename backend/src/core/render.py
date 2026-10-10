@@ -9,9 +9,10 @@ import subprocess
 # ---------------------------
 # Utilities
 # ---------------------------
-def _pdf_to_png_pymupdf(pdf_path: str | Path, out_dir: str | Path, dpi: int) -> List[Path]:
+def _pdf_to_png_pymupdf(pdf_path: str | Path, out_dir: str | Path, dpi: int, max_pages: int | None = None) -> List[Path]:
     """
     Rasterize a PDF to PNG pages using PyMuPDF at a target DPI.
+    Only the first `max_pages` pages are rendered when a cap is given.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -23,6 +24,8 @@ def _pdf_to_png_pymupdf(pdf_path: str | Path, out_dir: str | Path, dpi: int) -> 
     zoom = dpi / 72.0
     mat = fitz.Matrix(zoom, zoom)
     for i, page in enumerate(doc, 1):
+        if max_pages is not None and i > max_pages:
+            break
         pix = page.get_pixmap(matrix=mat)
         p = out / f"slide_{i:03d}.png"
         pix.save(str(p))
